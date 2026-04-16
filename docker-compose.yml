@@ -1,0 +1,31 @@
+version: "3.9"
+
+services:
+
+  # ── 分析代码目录，生成 graph.json ──────────────────────────────────
+  graphify-build:
+    build:
+      context: .
+      dockerfile: Dockerfile.graphify
+    volumes:
+      - .:/workspace:ro                    # 分析目标（只读），换成你自己的项目路径
+      - graphify-data:/graphify-out        # 输出图谱数据
+    command: graphify /workspace
+
+  # ── MCP Server，供外部 AI 助手通过 SSE 连接查询图谱 ──────────────────
+  graphify-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.graphify
+    volumes:
+      - graphify-data:/graphify-out
+    ports:
+      - "8080:8080"
+    command: python -m graphify.serve /graphify-out/graph.json
+    depends_on:
+      graphify-build:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  graphify-data:

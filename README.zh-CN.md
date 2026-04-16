@@ -93,6 +93,89 @@ Codex 用户还需要在 `~/.codex/config.toml` 的 `[features]` 下打开 `mult
 
 可以这样理解：常驻 hook 是先给助手一张地图，`/graphify` 这几个命令则是让它沿着地图精确导航。
 
+### Docker 部署
+
+在容器中运行 graphify — 适合 CI 流水线、隔离环境，或与任何支持 MCP 的容器化 AI 助手搭配使用。
+
+**1. 在项目根目录创建 `Dockerfile.graphify`：**
+
+```dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+COPY . .
+RUN pip install --no-cache-dir ".[mcp,leiden,pdf]"
+
+ENTRYPOINT ["graphify"]
+```
+
+**2. 构建镜像并分析代码库：**
+
+```bash
+# 构建镜像
+docker build -t graphify -f Dockerfile.graphify .
+
+# 分析目录，输出到本地文件夹
+docker run --rm \
+  -v /path/to/your/project:/workspace:ro \
+  -v ./graphify-out:/graphify-out \
+  graphify /workspace
+```
+
+**3. 作为 MCP Server 运行（供 AI 助手调用）：**
+
+```bash
+docker run --rm -p 8080:8080 \
+  -v ./graphify-out:/graphify-out \
+  graphify python -m graphify.serve /graphify-out/graph.json
+```
+
+然后在 AI 助手的 MCP 设置中指向 `http://localhost:8080/sse`（如果 AI 助手也在同一 Docker 网络中，使用容器网络地址）。
+
+**4. docker-compose（图谱构建 + MCP 服务器）：**
+
+```yaml
+version: "3.9"
+
+services:
+  graphify-build:
+    build: { context: ., dockerfile: Dockerfile.graphify }
+    volumes:
+      - /path/to/your/project:/workspace:ro
+      - graphify-data:/graphify-out
+    command: graphify /workspace
+
+  graphify-mcp:
+    build: { context: ., dockerfile: Dockerfile.graphify }
+    volumes:
+      - graphify-data:/graphify-out
+    ports:
+      - "8080:8080"
+    command: python -m graphify.serve /graphify-out/graph.json
+    depends_on:
+      graphify-build:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  graphify-data:
+```
+
+AI 助手的 MCP 客户端配置：
+
+```json
+{
+  "mcpServers": {
+    "graphify": {
+      "transport": "sse",
+      "url": "http://graphify-mcp:8080/sse"
+    }
+  }
+}
+```
+
+> **注意：** 代码文件在容器内通过 tree-sitter 本地处理，不需要 LLM API。文档、论文和图片的语义提取需要通过环境变量传入 AI API Key（例如 `-e ANTHROPIC_API_KEY=...`）。
+
 <details>
 <summary>手动安装（curl）</summary>
 

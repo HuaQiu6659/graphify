@@ -184,6 +184,89 @@ That gives the assistant structured graph access for repeated queries such as
 > ```
 > Also note: the PyPI package is `graphifyy` (double-y) — `pip install graphify` installs an unrelated package.
 
+### Docker deployment
+
+Run graphify in a container — useful for CI pipelines, isolated environments, or pairing with any containerized AI assistant that supports MCP.
+
+**1. Create `Dockerfile.graphify`** in the project root:
+
+```dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+COPY . .
+RUN pip install --no-cache-dir ".[mcp,leiden,pdf]"
+
+ENTRYPOINT ["graphify"]
+```
+
+**2. Build and analyze a codebase:**
+
+```bash
+# Build the image
+docker build -t graphify -f Dockerfile.graphify .
+
+# Analyze a directory and output to a local folder
+docker run --rm \
+  -v /path/to/your/project:/workspace:ro \
+  -v ./graphify-out:/graphify-out \
+  graphify /workspace
+```
+
+**3. Run as an MCP Server (for AI assistants):**
+
+```bash
+docker run --rm -p 8080:8080 \
+  -v ./graphify-out:/graphify-out \
+  graphify python -m graphify.serve /graphify-out/graph.json
+```
+
+Then configure your AI assistant's MCP settings to point at `http://localhost:8080/sse` (or the container network address if both are in the same Docker network).
+
+**4. docker-compose (build + MCP server):**
+
+```yaml
+version: "3.9"
+
+services:
+  graphify-build:
+    build: { context: ., dockerfile: Dockerfile.graphify }
+    volumes:
+      - /path/to/your/project:/workspace:ro
+      - graphify-data:/graphify-out
+    command: graphify /workspace
+
+  graphify-mcp:
+    build: { context: ., dockerfile: Dockerfile.graphify }
+    volumes:
+      - graphify-data:/graphify-out
+    ports:
+      - "8080:8080"
+    command: python -m graphify.serve /graphify-out/graph.json
+    depends_on:
+      graphify-build:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  graphify-data:
+```
+
+MCP client config for your AI assistant:
+
+```json
+{
+  "mcpServers": {
+    "graphify": {
+      "transport": "sse",
+      "url": "http://graphify-mcp:8080/sse"
+    }
+  }
+}
+```
+
+> **Note:** Code files are processed locally via tree-sitter inside the container — no LLM API needed. Docs, papers, and images require an AI API key passed via environment variable (e.g. `-e ANTHROPIC_API_KEY=...`).
+
 <details>
 <summary>Manual install (curl)</summary>
 
